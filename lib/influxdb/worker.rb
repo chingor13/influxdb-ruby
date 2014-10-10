@@ -1,6 +1,7 @@
 require 'thread'
 require "net/http"
 require "uri"
+require "timeout"
 
 module InfluxDB
   class Worker
@@ -12,6 +13,7 @@ module InfluxDB
     MAX_POST_POINTS = 1000
     NUM_WORKER_THREADS = 3
     SLEEP_INTERVAL = 5
+    EXIT_TIMEOUT = 0.5
 
     def initialize(client)
       @queue = InfluxDB::MaxQueue.new
@@ -40,7 +42,14 @@ module InfluxDB
 
           at_exit do
             log :debug, "Thread exiting, flushing queue."
-            check_background_queue(thread_num) until @queue.empty?
+            begin
+              Timeout.timeout(EXIT_TIMEOUT) do
+                check_background_queue(thread_num) until @queue.empty?
+              end
+            rescue Timeout::Error
+              # ignore and continue with exit
+              log :debug, "Checking background queue timed out after #{EXIT_TIMEOUT} seconds"
+            end
           end
 
           while !client.stopped?
